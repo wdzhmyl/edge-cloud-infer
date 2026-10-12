@@ -1,5 +1,19 @@
-gradio>=4.0
+# ===== 边缘端推理 =====
 ultralytics>=8.1
+opencv-python
+numpy
+
+# ===== 云端大模型（OpenAI 兼容接口）=====
 openai>=1.0
+
+# ===== 后端 API（FastAPI 前后端分离架构，主推）=====
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# ===== 旧版 Gradio 网页（interfaces/web.py，保留备用，不需要可删）=====
+# gradio>=4.0
+
+# ===== 工具 =====
 Pillow>=10.0
 python-dotenv>=1.0

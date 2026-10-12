@@ -3,11 +3,19 @@
 无 API Key 或调用失败时，回退到本地模板报告（core.fallback_report），保证服务始终可运行。
 """
 import base64
+import re
 
 from openai import OpenAI
 
 from config import settings
 from core import fallback_report
+
+
+def _strip_think(text):
+    """去除推理模型（如 deepseek-r1）返回的 <think>...</think> 思考过程，保持报告清爽。"""
+    if not text:
+        return text
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 SYSTEM_PROMPT = """你是一名智慧工地安全巡检 AI 助手。基于边缘端目标检测结果（类别/置信度/是否闯入危险作业区）以及原始图像，
 输出一份结构化的《施工安全巡检报告》，严格使用以下 Markdown 结构：
@@ -53,15 +61,11 @@ def generate_report(detections, image_path, intrusions=None):
             model=settings.LLM_MODEL,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": [
-                    {"type": "text", "text": f"目标检测结果：{summary}。请结合图像生成施工安全巡检报告。"},
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/jpeg;base64,{_encode_image(image_path)}"}},
-                ]},
+                {"role": "user", "content": f"以下是边缘端 YOLOv8 目标检测结果，请基于此生成施工安全巡检报告：\n{summary}"},
             ],
             max_tokens=settings.LLM_MAX_TOKENS,
         )
-        return resp.choices[0].message.content
+        return _strip_think(resp.choices[0].message.content)
     except Exception as e:
         note = f"\n\n（云端模型调用失败，已回退本地兜底：{e}）"
         return fallback_report.build_fallback_report(detections, intrusions=intrusions, note=note)

@@ -20,6 +20,8 @@ tmp/
 screenshots/
 *.tmp
 *.log
+# 内网穿透临时地址（运行时生成，不入库）
+tunnel_url.txt
 
 # ===== 归档旧版（原始 zip 备份在 city_safety_eye_deploy/）=====
 legacy/

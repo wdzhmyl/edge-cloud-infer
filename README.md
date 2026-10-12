@@ -26,7 +26,7 @@
 
 ```mermaid
 flowchart TD
-    UI["交互层 interfaces/<br/>Gradio 网页（智慧工地安全巡检）"]
+    UI["交互层 interfaces/<br/>Vue3 前端 + FastAPI API（Gradio 旧版保留）"]
     PIPE["编排层 pipeline.collab<br/>边缘检测 → 危险区规则 → 云端理解 → 可视化"]
     DET["边缘推理层 core/edge_infer<br/>YOLOv8n 边缘检测 + 危险区闯入判定（CPU）"]
     REP["云端理解层 core/cloud_reason<br/>云端多模态大模型研判"]
@@ -55,6 +55,7 @@ edge_cloud_infer/
 ├── core/                   # 核心能力层
 │   ├── edge_infer.py        # 边缘推理层：YOLOv8n 本地检测 + 危险区闯入判定
 │   ├── cloud_reason.py       # 云端理解层：云端多模态大模型研判
+│   ├── monitor_service.py    # 监控服务层：摄像头调度 + 逐帧检测线程 + 截屏 + MJPEG 流（v2 新增）
 │   └── fallback_report.py    # 离线兜底层：本地兜底报告（无 Key 时）
 ├── utils/                  # 工具层
 │   ├── visualize.py         # 检测框 / 危险区绘制
@@ -63,7 +64,9 @@ edge_cloud_infer/
 ├── pipeline/               # 编排层
 │   └── collab.py            # 统一巡检入口：边缘检测→危险区→云端理解→可视化
 ├── interfaces/             # 交互层
-│   └── web.py              # Gradio 网页 Demo
+│   ├── api.py              # FastAPI 后端（v2 前后端分离主入口，端口 8000）
+│   └── web.py              # Gradio 网页 Demo（旧版，保留备用）
+├── frontend/               # Vue3 前端（v2 新增，端口 5173）
 ├── tests/                  # 测试
 │   └── test_smoke.py       # 冒烟测试
 ├── tools/                  # 工具脚本
@@ -116,8 +119,16 @@ edge_cloud_infer/
    # 编辑 .env，填入 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
    ```
    不填也能跑 —— 会自动用本地兜底报告（离线兜底层）。
-3. 启动：`python interfaces/web.py`
-   浏览器打开终端给出的地址（默认 `http://localhost:7860`），上传工地图片点"开始巡检"。
+3. 启动（二选一）：
+   - **前后端分离 v2（推荐）**：
+     ```bash
+     ./run.sh -d                                   # 启动 FastAPI 后端（:8000）
+     cd frontend && npm install && npm run dev     # 启动 Vue3 前端（:5173，需 Node 18+）
+     ```
+     浏览器访问 `http://localhost:5173`。接口文档：`http://localhost:8000/docs`。
+     生产模式：`cd frontend && npm run build` 后 FastAPI 自动托管 `dist/`，只跑后端一个进程即可。
+   - **旧版 Gradio 一体网页（保留备用）**：`python interfaces/web.py`
+     浏览器打开终端给出的地址（默认 `http://localhost:7860`），上传工地图片点"开始巡检"。
 
 > 首次运行会自动下载 `yolov8n.pt`（约 6MB）。
 
@@ -159,12 +170,40 @@ ZONE_WATCH_CLASSES = {"person", "car", "truck", "bus", "motorcycle", "bicycle"} 
 - **云端研判按需触发**：实时监控页专注边缘端 7×24 低成本盯防，仅在需要深度分析时才调云端，
   正是"端云协同 / 推理优化"的生产范式。
 
-## 十、可扩展点（框架预留）
+## 十、v2 前后端分离架构（FastAPI + Vue3）
+
+v2 将交互层从 Gradio 升级为**前后端分离**架构，核心推理/研判逻辑（`core/`、`pipeline/`、`utils/`）零改动：
+
+```
+frontend/                      Vue3 + Vite + Element Plus（端口 5173）
+  ├── src/api/index.js         后端 API 封装（axios）
+  ├── src/views/InspectView    # 图片巡检页
+  ├── src/views/MonitorView    # 实时监控页（MJPEG 流 + 轮询 + 画廊）
+  └── src/views/HelpView       # 使用说明
+interfaces/api.py              FastAPI 后端（端口 8000）
+  ├── POST /api/inspect        图片巡检（上传 → 检测 → 危险区 → 云端报告）
+  ├── GET  /api/cameras        搜索摄像头
+  ├── POST /api/cameras/net    添加网络/手机摄像头
+  ├── POST /api/monitor/start  开启监控
+  ├── POST /api/monitor/stop   停止监控
+  ├── GET  /api/monitor/stream MJPEG 实时视频流
+  ├── GET  /api/monitor/state  实时状态轮询
+  ├── POST /api/monitor/screenshot  主动截屏存证
+  ├── GET  /api/monitor/report 云端研判报告
+  └── GET  /api/screenshots/{name}  截图文件读取
+core/monitor_service.py        监控服务层（从 Gradio 层抽出的无 UI 服务：
+                               摄像头调度、逐帧检测线程、状态维护、截屏、MJPEG 流）
+```
+
+**关键设计**：监控逻辑（摄像头 + 检测线程 + 截屏）被抽取为与 UI 无关的 `core/monitor_service.py`，
+Gradio 与 FastAPI 均可复用；旧版 `interfaces/web.py` 保留可独立运行。
+
+## 十一、可扩展点（框架预留）
 
 | 扩展方向 | 改动位置 |
 |----------|----------|
 | 接入专用模型（安全帽/反光衣检测） | 替换 `config.DETECTION_MODEL` 为工地专用权重 |
 | 多摄像头同屏 / 轮巡 | 在 `utils/camera.py` 支持多路 `CameraManager`，网页加布局 |
 | 支持短视频：按帧采样 + 时序汇总 | 新增 `pipeline/video.py` |
-| 增加 API 接口供大屏调用 | 新增 `interfaces/api.py`（FastAPI） |
+| 增加 API 接口供大屏调用 | ✅ 已实现：`interfaces/api.py`（FastAPI，`/api/*`），大屏/第三方系统可直接对接 |
 | 缓存 / 批处理加速 | `pipeline/collab.py` 中加入缓存与批量推理 |
